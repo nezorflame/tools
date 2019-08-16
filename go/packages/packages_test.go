@@ -1053,9 +1053,6 @@ const A = 1
 // TestOverlayModFileChanges tests the behavior resulting from having files from
 // multiple modules in overlays.
 func TestOverlayModFileChanges(t *testing.T) {
-	// TODO: Enable this test when golang/go#32499 is resolved.
-	t.Skip()
-
 	// Create two unrelated modules in a temporary directory.
 	tmp, err := ioutil.TempDir("", "tmp")
 	if err != nil {
@@ -1086,6 +1083,8 @@ func TestOverlayModFileChanges(t *testing.T) {
 	defer os.Remove(mod2)
 
 	want := `module mod2
+
+go 1.11
 `
 	if err := ioutil.WriteFile(filepath.Join(mod2, "go.mod"), []byte(want), 0775); err != nil {
 		t.Fatal(err)
@@ -1979,6 +1978,69 @@ func testReturnErrorWhenUsingNonGoFiles(t *testing.T, exporter packagestest.Expo
 	}
 }
 
+func TestReturnErrorWhenUsingGoFilesInMultipleDirectories(t *testing.T) {
+	packagestest.TestAll(t, testReturnErrorWhenUsingGoFilesInMultipleDirectories)
+}
+func testReturnErrorWhenUsingGoFilesInMultipleDirectories(t *testing.T, exporter packagestest.Exporter) {
+	exported := packagestest.Export(t, exporter, []packagestest.Module{{
+		Name: "golang.org/gopatha",
+		Files: map[string]interface{}{
+			"a/a.go": `package a`,
+			"b/b.go": `package b`,
+		}}})
+	defer exported.Cleanup()
+	want := "named files must all be in one directory"
+	pkgs, err := packages.Load(exported.Config, exported.File("golang.org/gopatha", "a/a.go"), exported.File("golang.org/gopatha", "b/b.go"))
+	if err != nil {
+		// Check if the error returned is the one we expected.
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("want error message: %s, got: %s", want, err.Error())
+		}
+		return
+	}
+	if len(pkgs) != 1 || pkgs[0].PkgPath != "command-line-arguments" {
+		t.Fatalf("packages.Load: want [command-line-arguments], got %v", pkgs)
+	}
+	if len(pkgs[0].Errors) != 1 {
+		t.Fatalf("result of Load: want package with one error, got: %+v", pkgs[0])
+	}
+	got := pkgs[0].Errors[0].Error()
+	if !strings.Contains(got, want) {
+		t.Fatalf("want error message: %s, got: %s", want, got)
+	}
+}
+
+func TestReturnErrorForUnexpectedDirectoryLayout(t *testing.T) {
+	packagestest.TestAll(t, testReturnErrorForUnexpectedDirectoryLayout)
+}
+func testReturnErrorForUnexpectedDirectoryLayout(t *testing.T, exporter packagestest.Exporter) {
+	exported := packagestest.Export(t, exporter, []packagestest.Module{{
+		Name: "golang.org/gopatha",
+		Files: map[string]interface{}{
+			"a/testdata/a.go": `package a; import _ "b"`,
+			"a/vendor/b/b.go": `package b; import _ "fmt"`,
+		}}})
+	defer exported.Cleanup()
+	want := "unexpected directory layout"
+	// triggering this error requires a relative package path
+	exported.Config.Dir = filepath.Dir(exported.File("golang.org/gopatha", "a/testdata/a.go"))
+	pkgs, err := packages.Load(exported.Config, ".")
+
+	// This error doesn't seem to occur in module mode; so only
+	// complain if we get zero packages while also getting no error.
+	if err == nil {
+		if len(pkgs) == 0 {
+			// TODO(dh): we'll need to expand on the error check if/when Go stops emitting this error
+			t.Fatalf("want error, got nil")
+		}
+		return
+	}
+	// Check if the error returned is the one we expected.
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("want error message: %s, got: %s", want, err.Error())
+	}
+}
+
 func TestMissingDependency(t *testing.T) { packagestest.TestAll(t, testMissingDependency) }
 func testMissingDependency(t *testing.T, exporter packagestest.Exporter) {
 	exported := packagestest.Export(t, exporter, []packagestest.Module{{
@@ -2041,6 +2103,39 @@ func testAdHocContains(t *testing.T, exporter packagestest.Exporter) {
 	if len(pkg.GoFiles) != 1 || pkg.GoFiles[0] != filename {
 		t.Fatalf("GoFiles of loaded packge: want [%s], got %v", filename, pkg.GoFiles)
 	}
+}
+
+func TestNoCcompiler(t *testing.T) { packagestest.TestAll(t, testNoCcompiler) }
+func testNoCcompiler(t *testing.T, exporter packagestest.Exporter) {
+	exported := packagestest.Export(t, exporter, []packagestest.Module{{
+		Name: "golang.org/fake",
+		Files: map[string]interface{}{
+			"a/a.go": `package a
+import "net/http"
+const A = http.MethodGet
+`,
+		}}})
+	defer exported.Cleanup()
+
+	// Explicitly enable cgo but configure a nonexistent C compiler.
+	exported.Config.Env = append(exported.Config.Env, "CGO_ENABLED=1", "CC=doesnotexist")
+	exported.Config.Mode = packages.LoadAllSyntax
+	initial, err := packages.Load(exported.Config, "golang.org/fake/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check value of a.A.
+	a := initial[0]
+	aA := constant(a, "A")
+	if aA == nil {
+		t.Fatalf("a.A: got nil")
+	}
+	got := aA.Val().String()
+	if got != "\"GET\"" {
+		t.Errorf("a.A: got %s, want %s", got, "\"GET\"")
+	}
+
 }
 
 func errorMessages(errors []packages.Error) []string {

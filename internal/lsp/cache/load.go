@@ -11,10 +11,10 @@ import (
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/internal/lsp/source"
 	"golang.org/x/tools/internal/lsp/telemetry"
-	"golang.org/x/tools/internal/lsp/telemetry/log"
-	"golang.org/x/tools/internal/lsp/telemetry/tag"
-	"golang.org/x/tools/internal/lsp/telemetry/trace"
 	"golang.org/x/tools/internal/span"
+	"golang.org/x/tools/internal/telemetry/log"
+	"golang.org/x/tools/internal/telemetry/tag"
+	"golang.org/x/tools/internal/telemetry/trace"
 	errors "golang.org/x/xerrors"
 )
 
@@ -80,7 +80,7 @@ func (v *view) checkMetadata(ctx context.Context, f *goFile) (map[packageID]*met
 
 	// Check if the context has been canceled before calling packages.Load.
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, errors.Errorf("checkMetadata: %v", ctx.Err())
 	}
 
 	ctx, done := trace.StartSpan(ctx, "packages.Load", telemetry.File.Of(f.filename()))
@@ -229,10 +229,13 @@ func (v *view) link(ctx context.Context, g *importGraph) error {
 			log.Error(ctx, "not a Go file", nil, telemetry.File.Of(filename))
 			continue
 		}
+		// Cache the metadata for this file.
+		gof.mu.Lock()
 		if gof.meta == nil {
 			gof.meta = make(map[packageID]*metadata)
 		}
 		gof.meta[m.id] = m
+		gof.mu.Unlock()
 	}
 
 	// Preserve the import graph.

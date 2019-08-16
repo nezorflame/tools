@@ -20,7 +20,6 @@ import (
 	"golang.org/x/tools/internal/lsp/diff"
 	"golang.org/x/tools/internal/lsp/protocol"
 	"golang.org/x/tools/internal/lsp/source"
-	"golang.org/x/tools/internal/lsp/telemetry/log"
 	"golang.org/x/tools/internal/lsp/tests"
 	"golang.org/x/tools/internal/span"
 )
@@ -41,8 +40,6 @@ func testLSP(t *testing.T, exporter packagestest.Exporter) {
 	ctx := tests.Context(t)
 	data := tests.Load(t, exporter, "testdata")
 	defer data.Exported.Cleanup()
-
-	log.AddLogger(log.NullLogger)
 
 	cache := cache.New()
 	session := cache.NewSession(ctx)

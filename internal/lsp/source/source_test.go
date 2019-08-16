@@ -17,8 +17,8 @@ import (
 	"golang.org/x/tools/go/packages/packagestest"
 	"golang.org/x/tools/internal/lsp/cache"
 	"golang.org/x/tools/internal/lsp/diff"
+	"golang.org/x/tools/internal/lsp/fuzzy"
 	"golang.org/x/tools/internal/lsp/source"
-	"golang.org/x/tools/internal/lsp/telemetry/log"
 	"golang.org/x/tools/internal/lsp/tests"
 	"golang.org/x/tools/internal/span"
 )
@@ -37,8 +37,6 @@ func testSource(t *testing.T, exporter packagestest.Exporter) {
 	ctx := tests.Context(t)
 	data := tests.Load(t, exporter, "../testdata")
 	defer data.Exported.Cleanup()
-
-	log.AddLogger(log.NullLogger)
 
 	cache := cache.New()
 	session := cache.NewSession(ctx)
@@ -158,16 +156,23 @@ func (r *runner) Completion(t *testing.T, data tests.Completions, snippets tests
 			t.Fatalf("failed to get token for %s: %v", src.URI(), err)
 		}
 		pos := tok.Pos(src.Start().Offset())
+		deepComplete := strings.Contains(string(src.URI()), "deepcomplete")
 		list, surrounding, err := source.Completion(ctx, r.view, f.(source.GoFile), pos, source.CompletionOptions{
-			DeepComplete:     strings.Contains(string(src.URI()), "deepcomplete"),
+			DeepComplete:     deepComplete,
 			WantDocumentaton: true,
 		})
 		if err != nil {
 			t.Fatalf("failed for %v: %v", src, err)
 		}
-		var prefix string
+		var (
+			prefix       string
+			fuzzyMatcher *fuzzy.Matcher
+		)
 		if surrounding != nil {
 			prefix = strings.ToLower(surrounding.Prefix())
+			if deepComplete && prefix != "" {
+				fuzzyMatcher = fuzzy.NewMatcher(surrounding.Prefix(), fuzzy.Symbol)
+			}
 		}
 		wantBuiltins := strings.Contains(string(src.URI()), "builtins")
 		var got []source.CompletionItem
@@ -175,10 +180,19 @@ func (r *runner) Completion(t *testing.T, data tests.Completions, snippets tests
 			if !wantBuiltins && isBuiltin(item) {
 				continue
 			}
-			// We let the client do fuzzy matching, so we return all possible candidates.
-			// To simplify testing, filter results with prefixes that don't match exactly.
-			if !strings.HasPrefix(strings.ToLower(item.Label), prefix) {
-				continue
+
+			// If deep completion is enabled, we need to use the fuzzy matcher to match
+			// the code's behvaior.
+			if deepComplete {
+				if fuzzyMatcher != nil && fuzzyMatcher.Score(item.Label) <= 0 {
+					continue
+				}
+			} else {
+				// We let the client do fuzzy matching, so we return all possible candidates.
+				// To simplify testing, filter results with prefixes that don't match exactly.
+				if !strings.HasPrefix(strings.ToLower(item.Label), prefix) {
+					continue
+				}
 			}
 			got = append(got, item)
 		}

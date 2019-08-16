@@ -21,8 +21,8 @@ import (
 	"golang.org/x/tools/internal/lsp/debug"
 	"golang.org/x/tools/internal/lsp/source"
 	"golang.org/x/tools/internal/lsp/telemetry"
-	"golang.org/x/tools/internal/lsp/telemetry/log"
 	"golang.org/x/tools/internal/span"
+	"golang.org/x/tools/internal/telemetry/log"
 )
 
 type view struct {
@@ -421,13 +421,6 @@ func (v *view) remove(ctx context.Context, id packageID, seen map[packageID]stru
 				files:  hashParseKeys(cph.Files()),
 				config: hashConfig(cph.Config()),
 			})
-			// Also, delete all of the cached ParseGoHandles.
-			for _, ph := range cph.Files() {
-				v.session.cache.store.Delete(parseKey{
-					file: ph.File().Identity(),
-					mode: ph.Mode(),
-				})
-			}
 		}
 		delete(gof.pkgs, id)
 		gof.mu.Unlock()
