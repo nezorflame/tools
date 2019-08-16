@@ -91,6 +91,18 @@ type metadataCache struct {
 	ids      map[packagePath]packageID
 }
 
+func (mc *metadataCache) getPackages() []*metadata {
+	var pkgs []*metadata
+
+	mc.mu.Lock()
+	for _, pkg := range mc.packages {
+		pkgs = append(pkgs, pkg)
+	}
+	mc.mu.Unlock()
+
+	return pkgs
+}
+
 type metadata struct {
 	id         packageID
 	pkgPath    packagePath
@@ -535,6 +547,41 @@ func (v *view) mapFile(uri span.URI, f viewFile) {
 	if f.addURI(uri) == 1 {
 		basename := basename(f.filename())
 		v.filesByBase[basename] = append(v.filesByBase[basename], f)
+	}
+}
+
+func (v *view) Search() source.SearchFunc {
+	return v.walk
+}
+
+func (v *view) walk(walkFunc source.WalkFunc) {
+	if v.mcache == nil {
+		return
+	}
+
+	pkgs := v.mcache.getPackages()
+	ctx := v.backgroundCtx
+	for _, m := range pkgs {
+		imp := &importer{
+			view:              v,
+			ctx:               ctx,
+			config:            v.Config(ctx),
+			seen:              make(map[packageID]struct{}),
+			topLevelPackageID: m.id,
+		}
+		cph, err := imp.checkPackageHandle(m)
+		if err != nil {
+			log.Error(ctx, "failed to get CheckPackageHandle", err)
+			continue
+		}
+		pkg, err := cph.check(ctx)
+		if err != nil {
+			log.Error(ctx, "failed to check package", err)
+			continue
+		}
+		if walkFunc(pkg) {
+			return
+		}
 	}
 }
 

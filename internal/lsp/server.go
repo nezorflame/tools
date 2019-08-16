@@ -13,6 +13,7 @@ import (
 	"golang.org/x/tools/internal/jsonrpc2"
 	"golang.org/x/tools/internal/lsp/protocol"
 	"golang.org/x/tools/internal/lsp/source"
+	"golang.org/x/tools/internal/lsp/telemetry/log"
 	"golang.org/x/tools/internal/span"
 )
 
@@ -193,8 +194,9 @@ func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TextDocume
 	return s.typeDefinition(ctx, params)
 }
 
-func (s *Server) Implementation(context.Context, *protocol.TextDocumentPositionParams) ([]protocol.Location, error) {
-	return nil, notImplemented("Implementation")
+func (s *Server) Implementation(ctx context.Context, params *protocol.TextDocumentPositionParams) ([]protocol.Location, error) {
+	log.Print(ctx, "called s.Implementation")
+	return s.implementation(ctx, params)
 }
 
 func (s *Server) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {

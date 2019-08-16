@@ -33,7 +33,7 @@ func (view *view) loadParseTypecheck(ctx context.Context, f *goFile) error {
 		}
 		cph, err := imp.checkPackageHandle(m)
 		if err != nil {
-			log.Error(ctx, "failed to get CheckPackgeHandle", err)
+			log.Error(ctx, "failed to get CheckPackageHandle", err)
 			continue
 		}
 		pkg, err := cph.check(ctx)

@@ -232,6 +232,8 @@ type View interface {
 	// Ignore returns true if this file should be ignored by this view.
 	Ignore(span.URI) bool
 
+	Search() SearchFunc
+
 	Config(ctx context.Context) *packages.Config
 
 	// RunProcessEnvFunc runs fn with the process env for this view inserted into opts.

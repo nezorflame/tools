@@ -1,7 +1,7 @@
 // Package protocol contains data types and code for LSP jsonrpcs
 // generated automatically from vscode-languageserver-node
-// commit: 8801c20b667945f455d7e023c71d2f741caeda25
-// last fetched Sat Jul 13 2019 18:33:10 GMT-0700 (Pacific Daylight Time)
+// commit: 51ce5233b6f97a4e2b6bee8f729205774a243140
+// last fetched Fri Aug 16 2019 19:17:00 GMT+0300 (Moscow Standard Time)
 package protocol
 
 // Code generated (see typescript/README.md) DO NOT EDIT.
@@ -3865,6 +3865,11 @@ const (
 
 	// TypeParameter is
 	TypeParameter SymbolKind = 26
+
+	/*Empty defined:
+	 * Empty kind.
+	 */
+	Empty CodeActionKind = ""
 
 	/*QuickFix defined:
 	 * Base kind for quickfix actions: 'quickfix'
