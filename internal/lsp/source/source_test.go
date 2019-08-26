@@ -18,6 +18,7 @@ import (
 	"golang.org/x/tools/internal/lsp/cache"
 	"golang.org/x/tools/internal/lsp/diff"
 	"golang.org/x/tools/internal/lsp/fuzzy"
+	"golang.org/x/tools/internal/lsp/protocol"
 	"golang.org/x/tools/internal/lsp/source"
 	"golang.org/x/tools/internal/lsp/tests"
 	"golang.org/x/tools/internal/span"
@@ -70,74 +71,10 @@ func (r *runner) Diagnostics(t *testing.T, data tests.Diagnostics) {
 			}
 			continue
 		}
-		if diff := diffDiagnostics(uri, want, got); diff != "" {
+		if diff := tests.DiffDiagnostics(uri, want, got); diff != "" {
 			t.Error(diff)
 		}
 	}
-}
-
-func sortDiagnostics(d []source.Diagnostic) {
-	sort.Slice(d, func(i int, j int) bool {
-		if r := span.Compare(d[i].Span, d[j].Span); r != 0 {
-			return r < 0
-		}
-		return d[i].Message < d[j].Message
-	})
-}
-
-// diffDiagnostics prints the diff between expected and actual diagnostics test
-// results.
-func diffDiagnostics(uri span.URI, want, got []source.Diagnostic) string {
-	sortDiagnostics(want)
-	sortDiagnostics(got)
-	if len(got) != len(want) {
-		return summarizeDiagnostics(-1, want, got, "different lengths got %v want %v", len(got), len(want))
-	}
-	for i, w := range want {
-		g := got[i]
-		if w.Message != g.Message {
-			return summarizeDiagnostics(i, want, got, "incorrect Message got %v want %v", g.Message, w.Message)
-		}
-		if span.ComparePoint(w.Start(), g.Start()) != 0 {
-			return summarizeDiagnostics(i, want, got, "incorrect Start got %v want %v", g.Start(), w.Start())
-		}
-		// Special case for diagnostics on parse errors.
-		if strings.Contains(string(uri), "noparse") {
-			if span.ComparePoint(g.Start(), g.End()) != 0 || span.ComparePoint(w.Start(), g.End()) != 0 {
-				return summarizeDiagnostics(i, want, got, "incorrect End got %v want %v", g.End(), w.Start())
-			}
-		} else if !g.IsPoint() { // Accept any 'want' range if the diagnostic returns a zero-length range.
-			if span.ComparePoint(w.End(), g.End()) != 0 {
-				return summarizeDiagnostics(i, want, got, "incorrect End got %v want %v", g.End(), w.End())
-			}
-		}
-		if w.Severity != g.Severity {
-			return summarizeDiagnostics(i, want, got, "incorrect Severity got %v want %v", g.Severity, w.Severity)
-		}
-		if w.Source != g.Source {
-			return summarizeDiagnostics(i, want, got, "incorrect Source got %v want %v", g.Source, w.Source)
-		}
-	}
-	return ""
-}
-
-func summarizeDiagnostics(i int, want []source.Diagnostic, got []source.Diagnostic, reason string, args ...interface{}) string {
-	msg := &bytes.Buffer{}
-	fmt.Fprint(msg, "diagnostics failed")
-	if i >= 0 {
-		fmt.Fprintf(msg, " at %d", i)
-	}
-	fmt.Fprint(msg, " because of ")
-	fmt.Fprintf(msg, reason, args...)
-	fmt.Fprint(msg, ":\nexpected:\n")
-	for _, d := range want {
-		fmt.Fprintf(msg, "  %v\n", d)
-	}
-	fmt.Fprintf(msg, "got:\n")
-	for _, d := range got {
-		fmt.Fprintf(msg, "  %v\n", d)
-	}
-	return msg.String()
 }
 
 func (r *runner) Completion(t *testing.T, data tests.Completions, snippets tests.CompletionSnippets, items tests.CompletionItems) {
@@ -151,15 +88,15 @@ func (r *runner) Completion(t *testing.T, data tests.Completions, snippets tests
 		if err != nil {
 			t.Fatalf("failed for %v: %v", src, err)
 		}
-		tok, err := f.(source.GoFile).GetToken(ctx)
-		if err != nil {
-			t.Fatalf("failed to get token for %s: %v", src.URI(), err)
-		}
-		pos := tok.Pos(src.Start().Offset())
 		deepComplete := strings.Contains(string(src.URI()), "deepcomplete")
-		list, surrounding, err := source.Completion(ctx, r.view, f.(source.GoFile), pos, source.CompletionOptions{
+		unimported := strings.Contains(string(src.URI()), "unimported")
+		list, surrounding, err := source.Completion(ctx, r.view, f.(source.GoFile), protocol.Position{
+			Line:      float64(src.Start().Line() - 1),
+			Character: float64(src.Start().Column() - 1),
+		}, source.CompletionOptions{
 			DeepComplete:     deepComplete,
 			WantDocumentaton: true,
+			WantUnimported:   unimported,
 		})
 		if err != nil {
 			t.Fatalf("failed for %v: %v", src, err)
@@ -206,12 +143,10 @@ func (r *runner) Completion(t *testing.T, data tests.Completions, snippets tests
 			if err != nil {
 				t.Fatalf("failed for %v: %v", src, err)
 			}
-			tok, err := f.(source.GoFile).GetToken(ctx)
-			if err != nil {
-				t.Fatalf("failed to get token for %s: %v", src.URI(), err)
-			}
-			pos := tok.Pos(src.Start().Offset())
-			list, _, err := source.Completion(ctx, r.view, f.(source.GoFile), pos, source.CompletionOptions{
+			list, _, err := source.Completion(ctx, r.view, f.(source.GoFile), protocol.Position{
+				Line:      float64(src.Start().Line() - 1),
+				Character: float64(src.Start().Column() - 1),
+			}, source.CompletionOptions{
 				DeepComplete: strings.Contains(string(src.URI()), "deepcomplete"),
 			})
 			if err != nil {
@@ -351,13 +286,12 @@ func (r *runner) Format(t *testing.T, data tests.Formats) {
 			}
 			continue
 		}
-		ops := source.EditsToDiff(edits)
 		data, _, err := f.Handle(ctx).Read(ctx)
 		if err != nil {
 			t.Error(err)
 			continue
 		}
-		got := strings.Join(diff.ApplyEdits(diff.SplitLines(string(data)), ops), "")
+		got := diff.ApplyEdits(string(data), edits)
 		if gofmted != got {
 			t.Errorf("format failed for %s, expected:\n%v\ngot:\n%v", filename, gofmted, got)
 		}
@@ -393,13 +327,12 @@ func (r *runner) Import(t *testing.T, data tests.Imports) {
 			}
 			continue
 		}
-		ops := source.EditsToDiff(edits)
 		data, _, err := f.Handle(ctx).Read(ctx)
 		if err != nil {
 			t.Error(err)
 			continue
 		}
-		got := strings.Join(diff.ApplyEdits(diff.SplitLines(string(data)), ops), "")
+		got := diff.ApplyEdits(string(data), edits)
 		if goimported != got {
 			t.Errorf("import failed for %s, expected:\n%v\ngot:\n%v", filename, goimported, got)
 		}
@@ -600,7 +533,7 @@ func (r *runner) Rename(t *testing.T, data tests.Renames) {
 	}
 }
 
-func applyEdits(contents string, edits []source.TextEdit) string {
+func applyEdits(contents string, edits []diff.TextEdit) string {
 	res := contents
 
 	// Apply the edits from the end of the file forward
